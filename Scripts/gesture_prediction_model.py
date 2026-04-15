@@ -103,12 +103,13 @@ for subject_folder in sorted(os.listdir(data_path)):
 
             filtered_cols = [
                 'FilteredChannel1', 'FilteredChannel2', 'FilteredChannel3', 'FilteredChannel4',
-                'FilteredChannel5', 'FilteredChannel6', 'FilteredChannel7', 'FilteredChannel8'
+                'FilteredChannel5', 'FilteredChannel6', 'FilteredChannel7', 'FilteredChannel8', 'GyroX',
+                'GyroY', 'GyroZ', 'AccX', 'AccY', 'AccZ', 'PPG1', 'PPG2'
             ]
 
             emg_data = df[filtered_cols].values.astype(np.float32)
 
-            cut_sample_rest = int(2 * fs)  # 2 seconds of rest data
+            cut_sample_rest = int(1.5 * fs)  # 2 seconds of rest data
 
             if emg_data.shape[
                 0] > 4 * fs and gesture_folder != "Gesture 0":  # makes sure that file is longer than 4 seconds and doesnt cut rest gesture
@@ -152,7 +153,7 @@ X_train, X_val, Y_train, Y_val = train_test_split(X_data, Y_data, test_size=0.2,
 
 #Creating the cnn model
 model_cnn = Sequential()
-model_cnn.add(Conv1D(64, kernel_size=15, activation = 'relu', padding='same', input_shape=(window_size, 8))) #(Sampling rate = 500Hz * Window length = 250ms, 8 channels)
+model_cnn.add(Conv1D(64, kernel_size=15, activation = 'relu', padding='same', input_shape=(window_size, len(filtered_cols)))) #(Sampling rate = 500Hz * Window length = 250ms, 8 channels)
 model_cnn.add(MaxPooling1D(2))
 
 model_cnn.add(Conv1D(64, kernel_size=9, activation = 'relu', padding='same'))
@@ -172,7 +173,7 @@ model_cnn.add(Dense(num_gestures, activation = 'softmax'))
 model_cnn.compile(optimizer='adam',loss='categorical_crossentropy',metrics=['accuracy'])
 model_cnn.summary()
 
-history = model_cnn.fit(X_train, Y_train, batch_size=32, epochs=250, validation_data=(X_val, Y_val))
+history = model_cnn.fit(X_train, Y_train, batch_size=32, epochs=100, validation_data=(X_val, Y_val))
 
 val_loss, val_accuracy = model_cnn.evaluate(X_val, Y_val, verbose=1)
 print(f"Validation Accuracy: {val_accuracy*100:.2f}%")
@@ -188,6 +189,7 @@ plt.title('CNN Model Loss')
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
 plt.legend()
+plt.savefig("Results/model_loss.png")
 plt.show()
 
 plt.figure()
@@ -197,6 +199,7 @@ plt.title('CNN Model Accuracy')
 plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
 plt.legend()
+plt.savefig("Results/model_acc.png")
 plt.show()
 
 #Confusion Matrix for Gestures
@@ -216,8 +219,14 @@ sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
 plt.xlabel('Predicted Gestures')
 plt.ylabel('True Gestures')
 plt.title('Gesture Recognition Confusion Matrix')
+plt.savefig("Results/conf_matrix.png")
 plt.show()
 
-print(classification_report(y_true, y_pred))
+print("\n--- Accuracy per Gesture ---")
+accuracies = cm.diagonal() / cm.sum(axis=1)
+for i, name in enumerate(class_labels):
+    print(f"{name:<20}: {accuracies[i]:.2%}")
+
+print(classification_report(y_true, y_pred, target_names=class_labels))
 
 model_cnn.save('gesture_recognition_model.keras')
