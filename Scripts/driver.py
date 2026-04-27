@@ -32,6 +32,7 @@ word_id = 0
 run = False
 typing = False
 checking = False
+wait = False
 
 # Load gesture prediction model
 gesture_model = load_model(r"C:\Users\gianc\SeniorDesign\gesture_recognition_model.keras")
@@ -137,7 +138,7 @@ def process_data(EMGData):
 # Call the FlexType model
 def flexType(taps):
     taps_payload = {
-        "keyboard": keyboard_id,
+        "keyboardId": keyboard_id,
         "vocab": "100k",
         "sort": "logprob",
         "safe": True,
@@ -169,6 +170,7 @@ print("Starting Predictions...")
 
 try:
     while True:
+####### Gesture Prediction Logic ##########
         EMGData = get_emg_data(num_points)
         processedData = process_data(EMGData)
 
@@ -178,74 +180,100 @@ try:
         confidence = np.max(gesture_pred)
         gesture_label = gesture_strings[np.argmax(gesture_pred)]
 
-        if(confidence > .8):
-            print(f"Predicted: {gesture_label} with confidence {confidence}")
-        else:
-            print(f"Low confidence ({confidence}) for predicted gesture: {gesture_label}")
+        if gesture_label != lastGesture:
+            if(confidence > .8):
+                print(f"Predicted: {gesture_label} with confidence {confidence}")
+            else:
+                print(f"Low confidence ({confidence}) for predicted gesture: {gesture_label}")
 
-        time.sleep(3)
+        lastGesture = gesture_label
+        
+####### Word Prediction Logic ##########
+        if (run == False and gesture_label == "Wiggle Fingers"):
+            run = True
+            typing = True
+            checking = False
+            wait = True
+
+        elif run:
+            if gesture_label in gesture_commands:
+                if gesture_label == "Wiggle Fingers" and not wait:
+                    wait = True
+                    reset() # Reset typing
+                    continue
+
+                if wait and gesture_label == "Rest":
+                    wait = False
+                    continue
+
+                if typing:
+                    if not wait:
+                        match gesture_label:
+                            case 'A-F':
+                                taps.append({"touches": [{"x": 0, "y": 0}], "certain": True})
+                                wait = True
+                            case 'G-M':
+                                taps.append({"touches": [{"x": 100, "y": 0}], "certain": True})
+                                wait = True
+                            case 'N-T':
+                                taps.append({"touches": [{"x": 200, "y": 0}], "certain": True})
+                                wait = True
+                            case 'U-Z':
+                                taps.append({"touches": [{"x": 300, "y": 0}], "certain": True})
+                                wait = True
+                            case 'Space/Enter': # Compile and check word
+                                wait = True
+                                typing = False
+                                checking = True
+                                word_pred = flexType(taps)
+
+                                print("\nPredicted Word: ")
+                                if "best" in word_pred and word_pred["best"]:
+                                    for i, pred in enumerate(word_pred["best"]):
+                                        print(f"Option {i}: {pred['text']}")
+                                else:
+                                    print("No words predicted.")
+                if checking:
+                    if not wait:
+                        if "best" in word_pred and len(word_pred["best"]) > 0:
+                            word = word_pred["best"][word_id]["text"]
+                            print(f"CURRENT SELECTION: [{word}] (Gesture Swipe to change)")
+                        match gesture_label:
+                            case 'Swipe': # Check next guessed word
+                                wait = True
+                                word_id+=1
+                                if word_id >= len(word_pred["best", []]):
+                                    word_id = 0
+                                word = word_pred["best"][word_id]["text"]
+                                print(f"Swiped! New Selected Word: [{word}]")
+                            case 'Delete': # Delete just-typed word
+                                wait = True
+                                typing = True
+                                checking = False
+                                word_id = 0
+                                taps = []
+                            case 'Space/Enter': # Continue to next word
+                                wait = True
+                                typing = True
+                                checking = False
+                                left += word + " "
+                                word_id = 0
+                                print(f"\nSENTENCE SO FAR:\n {left}")
+                                taps = []
+
+            time.sleep(0.1)
+
 except KeyboardInterrupt:
     print("Stopping Predictions...")
     board_shim.stop_stream()
     board_shim.release_session()
    
 
-# try:
-#     board_shim.stop_stream()
-# except:
-#     pass
-# #board_shim.start_stream()
 
-# # Live data loop
-# while True:
 
-#     # raw_data = get_emg_data(num_points) # NEED TO BUILD FUNCTION
+
+
+
 
 #     # buffer = np.roll(buffer, -1, axis=0)
 #     # buffer[-1, :] = raw_data
-
-#     # input_emg = process_data(EMGData) # NEED TO BUILD FUNCTION TO NORMALIZE/ FILTER DATA
-   
-#     gesture_pred = model.predict(input_emg)
-#     gesture_label = class_names[np.argmax(gesture_pred)]
-
-#     # print(f"Predicted: {gestures[gesture_id]}")
-
-#     if (run == False and gesture_label == "Start/Stop"):
-#         run = True
-#         typing = True
-
-#     if run:
-#         if gesture_label in gesture_commands:
-#             if gesture_label == "Start/Stop":
-#                 reset() # Reset typing
-#             if typing:
-#                 match gesture_label:
-#                     case 'A-F':
-#                         taps.append({"touches": [{"x": 0, "y": 0}], "certain": True})
-#                     case 'G-M':
-#                         taps.append({"touches": [{"x": 100, "y": 0}], "certain": True})
-#                     case 'N-T':
-#                         taps.append({"touches": [{"x": 200, "y": 0}], "certain": True})
-#                     case 'U-Z':
-#                         taps.append({"touches": [{"x": 300, "y": 0}], "certain": True})
-#                     case 'Space/Enter': # Compile and check word
-#                         typing = False
-#                         checking = True
-#                         word_pred = flexType(taps)
-#             if checking:
-#                 word = word_pred["best"][word_id]["text"]
-#                 match gesture_label:
-#                     case 'Swipe': # Check next guessed word
-#                         word_id+=1
-#                         if word_id >= len(word_pred["best"]):
-#                             word_id = 0
-#                     case 'Delete': # Delete just-typed word
-#                         typing = True
-#                         checking = False
-#                         word_id = 0
-#                     case 'Space/Enter': # Continue to next word
-#                         typing = True
-#                         checking = False
-#                         left += word + " "
-#                         word_id = 0
