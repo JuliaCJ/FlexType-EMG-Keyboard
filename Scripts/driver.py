@@ -40,26 +40,26 @@ gesture_model = load_model(r"C:\Users\gianc\SeniorDesign\gesture_recognition_mod
 #window_size = 125 ##Initialized to 2 seconds in Mindrove Initialization Below
 channels = 8
 gesture_commands = {
-    'Swipe':'Two-Finger Wave',
+    'Swipe':'L-sign',
     'A-F':'Middle Pinch',
     'G-M':'Ring Pinch',
     'N-T':'Pinky Pinch',
-    'U-Z':'L-Sign',
+    'U-Z':'Three Fingers',
     'Delete':'Thumb-Out',
     'Space/Enter':'Knock',
-    'Start/Stop':'Wiggle Fingers'
+    'Start/Stop':'Surfs Up'
 }
 
 gesture_strings = [
     'Rest',
-    'Two-Finger Wave',
     'Middle Pinch',
     'Ring Pinch',
     'Pinky Pinch',
     'L-Sign',
     'Thumb-Out',
     'Knock',
-    'Wiggle Fingers'
+    'Three Fingers',
+    'Surfs Up'
 ]
 ##buffer = np.zeros((window_size, channels))
 
@@ -189,7 +189,7 @@ try:
         lastGesture = gesture_label
         
 ####### Word Prediction Logic ##########
-        if (run == False and gesture_label == "Wiggle Fingers"):
+        if (run == False and gesture_label == "Surfs Up"):
             run = True
             typing = True
             checking = False
@@ -197,7 +197,7 @@ try:
 
         elif run:
             if gesture_label in gesture_commands:
-                if gesture_label == "Wiggle Fingers" and not wait:
+                if gesture_label == "Surfs Up" and not wait:
                     wait = True
                     reset() # Reset typing
                     continue
@@ -267,13 +267,6 @@ except KeyboardInterrupt:
     print("Stopping Predictions...")
     board_shim.stop_stream()
     board_shim.release_session()
-   
-
-
-
-
-
-
 
 #     # buffer = np.roll(buffer, -1, axis=0)
 #     # buffer[-1, :] = raw_data
