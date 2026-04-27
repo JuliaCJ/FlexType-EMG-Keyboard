@@ -103,7 +103,6 @@ def segment_and_rms(signal, window_size, step_size):
 
 
 def plot_rms():
-    # 100ms window = 50 samples @ 500Hz
     plot_window_size = int((RMS_WINDOW_MS / 1000) * fs)
     plot_step_size = plot_window_size // 2
 
