@@ -83,16 +83,16 @@ gesture_mapping = {
     "Gesture 0": "Rest",
     #"Gesture 1": "Two-Finger Wave",
     #"Gesture 2": "Index Pinch",
-    "Gesture 3": "Middle Pinch",
-    "Gesture 4": "Ring Pinch",
-    "Gesture 5": "Pinky Pinch",
-    "Gesture 6": "L-Sign",
-    "Gesture 7": "Thumb-Out",
-    "Gesture 8": "Knock",
+    "Gesture 3": "Middle Pinch", # a-f
+    "Gesture 4": "Ring Pinch", # g-m
+    "Gesture 5": "Pinky Pinch", # m-t
+    "Gesture 6": "L-Sign", # swipe
+    "Gesture 7": "Thumb-Out", # delete
+    "Gesture 8": "Knock", # space/ enter
     #"Gesture 9": "Pinky Up",
-    "Gesture 10": "Three Fingers",
+    "Gesture 10": "Three Fingers", # u-z
     #"Gesture 11": "Wiggle Fingers",
-    "Gesture 12": "Surfs Up"
+    "Gesture 12": "Surfs Up" # start/ stop
 }
 
 NUM_CLASSES = len(gesture_mapping)
