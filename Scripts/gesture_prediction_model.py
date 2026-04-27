@@ -104,7 +104,7 @@ class GestureVoter:
             # Only switch to rest from gesture prediction if probability is high.
             if self.current_stable != 0:
                 rest_prob = self.ema_probs[0]
-                # Rest predi
+                # # Rest prediction must be > 60%
                 if rest_prob > 0.6:
                     self.current_stable = 0
 
