@@ -4,64 +4,16 @@ import re
 import numpy as np
 import pandas as pd
 from tensorflow.keras.models import load_model
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import confusion_matrix, accuracy_score
-from collections import deque, Counter
 
-# Voter Class
-class GestureVoter:
-    def __init__(self, num_classes, decay=0.2, thresholds=None):
-        self.ema_probs = np.zeros(num_classes)
-        self.decay = decay
-        self.current_stable = 0
-        self.initialized = False
-
-        # Default threshold if not specified
-        self.default_threshold = 0.45
-
-        # Map specific thresholds to gestures that are confused often
-        self.thresholds = thresholds if thresholds else {}
-
-    def predict_voted_gesture(self, new_probs, temperature=0.8):
-        # Softmax temperature sharpening
-        sharpened_probs = np.power(new_probs, 1 / temperature)
-        sharpened_probs /= np.sum(sharpened_probs)
-
-        if not self.initialized:
-            self.ema_probs = sharpened_probs
-            self.initialized = True
-        else:
-            # EMA Update
-            self.ema_probs = (1 - self.decay) * self.ema_probs + self.decay * sharpened_probs
-
-        best_gesture = np.argmax(self.ema_probs)
-        best_confidence = self.ema_probs[best_gesture]
-
-        # Get threshold for gestures
-        thresh = self.thresholds.get(best_gesture, self.default_threshold)
-
-        # State transitions
-        if best_gesture != self.current_stable:
-            # Only switch if threshold met
-            if best_confidence >= thresh:
-                self.current_stable = best_gesture
-        else:
-            # Only switch to rest from gesture prediction if probability is high.
-            if self.current_stable != 0:
-                rest_prob = self.ema_probs[0]
-                # Rest prediction must be > 60%
-                if rest_prob > 0.6:
-                    self.current_stable = 0
-
-        return self.current_stable
-
-# Configuration
+# Parameter Configuration
 fs = 500
-window_size = 125
-step_size = 62
-VOTE_BUFFER_SIZE = 5
+MODEL_WINDOW_SIZE = 125  # The model expects 125 samples (250ms)
+MODEL_STEP_SIZE = 62
+RMS_WINDOW_MS = 100  # User requested 100ms for RMS plots
+main_folder = 'CPE4850 - Gesture Data/Test Data'
 
 # Tuning Dictionary
 CUSTOM_THRESHOLDS = {
@@ -96,79 +48,123 @@ gesture_mapping = {
 }
 
 NUM_CLASSES = len(gesture_mapping)
-
-# Helper functions
-def segment(signal, window_size=125, step_size=62):
-    segments = []
-    for start in range(0, signal.shape[0] - window_size + 1, step_size):
-        window = signal[start:start + window_size, :]
-        segments.append(window)
-    return np.array(segments)
-
-def extract_number(name):
-    match = re.search(r'\d+', name)
-    return int(match.group()) if match else 0
-
 ordered_class_names = [gesture_mapping[g] for g in gesture_mapping.keys()]
 
-# Setup
+# Helper Functions
+class GestureVoter:
+    def __init__(self, num_classes, decay=0.2, thresholds=None):
+        self.ema_probs = np.zeros(num_classes)
+        self.decay = decay
+        self.current_stable = 0
+        self.initialized = False
+        self.default_threshold = 0.45
+        self.thresholds = thresholds if thresholds else {}
+
+    def predict_voted_gesture(self, new_probs, temperature=0.8):
+        sharpened_probs = np.power(new_probs, 1 / temperature)
+        sharpened_probs /= np.sum(sharpened_probs)
+        if not self.initialized:
+            self.ema_probs = sharpened_probs
+            self.initialized = True
+        else:
+            self.ema_probs = (1 - self.decay) * self.ema_probs + self.decay * sharpened_probs
+
+        best_gesture = np.argmax(self.ema_probs)
+        best_confidence = self.ema_probs[best_gesture]
+        thresh = self.thresholds.get(best_gesture, self.default_threshold)
+
+        if best_gesture != self.current_stable:
+            if best_confidence >= thresh:
+                self.current_stable = best_gesture
+        else:
+            if self.current_stable != 0:
+                if self.ema_probs[0] > 0.6:
+                    self.current_stable = 0
+        return self.current_stable
+
+
+def segment_raw_windows(signal, window_size, step_size):
+    windows = []
+    for start in range(0, signal.shape[0] - window_size + 1, step_size):
+        windows.append(signal[start:start + window_size, :])
+    return np.array(windows)
+
+
+def calculate_rms(window):
+    return np.sqrt(np.mean(np.square(window), axis=0))
+
+
+def segment_and_rms(signal, window_size, step_size):
+    rms_values = []
+    for start in range(0, signal.shape[0] - window_size + 1, step_size):
+        window = signal[start:start + window_size, :]
+        rms_values.append(calculate_rms(window))
+    return np.array(rms_values)
+
+
+def plot_rms():
+    # 100ms window = 50 samples @ 500Hz
+    plot_window_size = int((RMS_WINDOW_MS / 1000) * fs)
+    plot_step_size = plot_window_size // 2
+
+    fig, axes = plt.subplots(3, 3, figsize=(15, 12), sharey=True)
+    axes = axes.flatten()
+
+    for i, (folder_name, label) in enumerate(gesture_mapping.items()):
+        folder_path = os.path.join(main_folder, folder_name)
+        files = glob.glob(os.path.join(folder_path, '*.csv'))
+        if not files: continue
+
+        df = pd.read_csv(files[0], sep=r'\s+', header=0)
+        emg_data = df.filter(like='FilteredChannel').values.astype(np.float32)
+        if emg_data.shape[1] == 0: emg_data = df.iloc[:, :8].values.astype(np.float32)
+
+        # Trimming for gestures
+        if folder_name != "Gesture 0":
+            emg_data = emg_data[2 * fs:-2 * fs] if len(emg_data) > 4 * fs else emg_data
+
+        rms_data = segment_and_rms(emg_data, plot_window_size, plot_step_size)
+        time_axis = np.arange(len(rms_data)) * (plot_step_size / fs)
+
+        for channel in range(8):
+            axes[i].plot(time_axis, rms_data[:, channel], alpha=0.7)
+        axes[i].set_title(label)
+        axes[i].set_xlabel("Time (s)")
+
+    plt.tight_layout()
+    plt.suptitle(f"RMS Values ({RMS_WINDOW_MS}ms Windows) per Gesture", y=1.02)
+    os.makedirs('Results', exist_ok=True)
+    plt.savefig('Results/gesture_rms_plots.png')
+    plt.show()
+
+# Testing Loop
 model = load_model('gesture_recognition_model.keras')
-main_folder = 'CPE4850 - Gesture Data/Test Data'
-gesture_folders = [f for f in os.listdir(main_folder) if os.path.isdir(os.path.join(main_folder, f))]
+all_predictions, true_labels = [], []
 
-all_predictions = []
-true_labels = []
+for folder_name in [f for f in os.listdir(main_folder) if os.path.isdir(os.path.join(main_folder, f))]:
+    if folder_name not in gesture_mapping: continue
 
-# Prediction Loop
-for folder_name in gesture_folders:
-    if folder_name not in gesture_mapping:
-        continue
-
-    current_gesture_idx = list(gesture_mapping.keys()).index(folder_name)
-    real_name = gesture_mapping[folder_name]
-
-    print(f"Testing {folder_name} ({real_name})...")
-
+    gesture_idx = list(gesture_mapping.keys()).index(folder_name)
     folder_path = os.path.join(main_folder, folder_name)
+
     for file in glob.glob(os.path.join(folder_path, '*.csv')):
-
-        # Instantiate a fresh voter for every new file/sequence
-        voter = GestureVoter(
-            num_classes=NUM_CLASSES,
-            decay=EMA_DECAY,
-            thresholds=CUSTOM_THRESHOLDS
-        )
-
+        voter = GestureVoter(NUM_CLASSES, decay=EMA_DECAY, thresholds=CUSTOM_THRESHOLDS)
         df = pd.read_csv(file, sep=r'\s+', header=0)
 
-        # Select the specific 8 channels the model expects
-        filtered_cols = [
-            'FilteredChannel1', 'FilteredChannel2', 'FilteredChannel3', 'FilteredChannel4',
-            'FilteredChannel5', 'FilteredChannel6', 'FilteredChannel7', 'FilteredChannel8'
-        ]
+        emg_data = df.filter(like='FilteredChannel').values.astype(np.float32)
+        if emg_data.shape[1] == 0: emg_data = df.iloc[:, :8].values.astype(np.float32)
 
-        try:
-            emg_data = df[filtered_cols].values.astype(np.float32)
-        except KeyError:
-            # Fallback if headers are missing: grab first 8 columns
-            emg_data = df.iloc[:, :8].values.astype(np.float32)
+        if folder_name != "Gesture 0":
+            emg_data = emg_data[2 * fs:-2 * fs] if len(emg_data) > 4 * fs else emg_data
 
-        # Trim 2 seconds on start/end data
-        cut_sample_rest = int(2*fs)
-        if emg_data.shape[0] > 4 * fs and folder_name != "Gesture 0":
-            emg_data = emg_data[cut_sample_rest:-cut_sample_rest]
+        windows = segment_raw_windows(emg_data, MODEL_WINDOW_SIZE, MODEL_STEP_SIZE)
 
-        # Slice the data into windows
-        windows = segment(emg_data, window_size=window_size, step_size=step_size)
-
-        if windows.shape[0] > 0:
+        if len(windows) > 0:
             preds = model.predict(windows, verbose=0)
-
             for p in preds:
-                # Pass the temperature parameter to sharpen predictions
                 stable_pred = voter.predict_voted_gesture(p, temperature=PROB_TEMP)
                 all_predictions.append(stable_pred)
-                true_labels.append(current_gesture_idx)
+                true_labels.append(gesture_idx)
 
 # Accuracy report
 print("\n--- Final Results ---")
@@ -224,3 +220,6 @@ for i, name in enumerate(ordered_class_names):
         print(f"{name:<20} | {confused_with:<20} | {max_error_count}")
     else:
         print(f"{name:<20} | {'None (100% Correct)':<20} | 0")
+
+# RMS PLot
+plot_rms()
