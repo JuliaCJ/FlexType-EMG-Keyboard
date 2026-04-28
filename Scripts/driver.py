@@ -40,7 +40,7 @@ gesture_model = load_model(r"C:\Users\gianc\SeniorDesign\gesture_recognition_mod
 #window_size = 125 ##Initialized to 2 seconds in Mindrove Initialization Below
 channels = 8
 gesture_commands = {
-    'Swipe':'L-sign',
+    'Swipe':'L-Sign',
     'A-F':'Middle Pinch',
     'G-M':'Ring Pinch',
     'N-T':'Pinky Pinch',
@@ -127,13 +127,50 @@ def process_data(EMGData):
 
     return filtered
 
-# def WriteToCSV(EMGData,CSVWriter):
+#Gesture Prediction Voting Setup
+CUSTOM_THRESHOLDS = {
+    1:  0.55, 
+    3:  0.40, # Middle Pinch
+    4:  0.40, # Ring Pinch
+    9:  0.65, # Pinky Up
+    11: 0.35, 
+}
 
-#     DataToWrite=process_data(EMGData)
-#     for i in range (DataToWrite.shape[1]):
-#         row=[DataToWrite[j,i] for j in range (8)]
-#         CSVWriter.writerow(row)
+EMA_DECAY = 0.3          # How much weight new predictions carry vs history
+PROB_TEMP = 0.8
+ENTER_THRESHOLD = 0.5   # Confidence needed to switch to a new gesture
+EXIT_THRESHOLD = 0.2    # Confidence drop needed to revert to Rest
+NUM_CLASSES = len(gesture_strings)
+class GestureVoter:
+    def __init__(self, num_classes, decay=0.2, thresholds=None):
+        self.ema_probs = np.zeros(num_classes)
+        self.decay = decay
+        self.current_stable = 0
+        self.initialized = False
+        self.default_threshold = 0.45
+        self.thresholds = thresholds if thresholds else {}
 
+    def predict_voted_gesture(self, new_probs, temperature=0.8):
+        sharpened_probs = np.power(new_probs, 1 / temperature)
+        sharpened_probs /= np.sum(sharpened_probs)
+        if not self.initialized:
+            self.ema_probs = sharpened_probs
+            self.initialized = True
+        else:
+            self.ema_probs = (1 - self.decay) * self.ema_probs + self.decay * sharpened_probs
+
+        best_gesture = np.argmax(self.ema_probs)
+        best_confidence = self.ema_probs[best_gesture]
+        thresh = self.thresholds.get(best_gesture, self.default_threshold)
+
+        if best_gesture != self.current_stable:
+            if best_confidence >= thresh:
+                self.current_stable = best_gesture
+        else:
+            if self.current_stable != 0:
+                if self.ema_probs[0] > 0.6:
+                    self.current_stable = 0
+        return self.current_stable
 
 # Call the FlexType model
 def flexType(taps):
@@ -168,6 +205,9 @@ def flexType(taps):
 board_shim.start_stream()
 print("Starting Predictions...")
 
+voter = GestureVoter(NUM_CLASSES, decay=EMA_DECAY, thresholds=CUSTOM_THRESHOLDS)
+lastGesture = ""
+
 try:
     while True:
 ####### Gesture Prediction Logic ##########
@@ -177,8 +217,11 @@ try:
         processedData = processedData.T
         processedData = np.expand_dims(processedData, axis=0)
         gesture_pred = gesture_model.predict(processedData)
-        confidence = np.max(gesture_pred)
-        gesture_label = gesture_strings[np.argmax(gesture_pred)]
+
+        gesture_idx = voter.predict_voted_gesture(gesture_pred[0], temperature=PROB_TEMP)
+        gesture_label = gesture_strings[gesture_idx]
+
+        confidence = voter.ema_probs[gesture_idx]
 
         if gesture_label != lastGesture:
             if(confidence > .8):
@@ -242,7 +285,7 @@ try:
                             case 'Swipe': # Check next guessed word
                                 wait = True
                                 word_id+=1
-                                if word_id >= len(word_pred["best", []]):
+                                if word_id >= len(word_pred.get("best", [])):
                                     word_id = 0
                                 word = word_pred["best"][word_id]["text"]
                                 print(f"Swiped! New Selected Word: [{word}]")
@@ -258,7 +301,7 @@ try:
                                 checking = False
                                 left += word + " "
                                 word_id = 0
-                                print(f"\nSENTENCE SO FAR:\n {left}")
+                                print(f"\nFull Message:\n {left}")
                                 taps = []
 
             time.sleep(0.1)
