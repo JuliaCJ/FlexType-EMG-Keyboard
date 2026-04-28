@@ -1,3 +1,24 @@
+import mindrove
+from mindrove.board_shim import BoardShim, MindRoveInputParams, BoardIds
+import mindrove.data_filter as MindroveFilter
+
+# Iitializing Mindrove EMG Sensor #
+BoardShim.enable_board_logger() # enable logger when developing to catch relevant logs
+params = MindRoveInputParams()
+board_id = BoardIds.MINDROVE_WIFI_BOARD
+board_shim = BoardShim(board_id, params)
+
+board_shim.prepare_session()
+
+emg_channels = BoardShim.get_emg_channels(board_id)
+#accel_channels = BoardShim.get_accel_channels(board_id)
+sampling_rate = BoardShim.get_sampling_rate(board_id)
+
+window_size = 2 # seconds
+window_size_samples = 125  # Match training window_size
+num_points = window_size_samples*8
+OffSet=300
+
 import requests
 import json
 import numpy as np
@@ -6,9 +27,6 @@ from tensorflow.keras.models import load_model
 import keras
 
 # Libraries for collecting data with Mindrove EMG Sensor ########################
-import mindrove
-from mindrove.board_shim import BoardShim, MindRoveInputParams, BoardIds
-import mindrove.data_filter as MindroveFilter
 import time
 import scipy
 from scipy import signal
@@ -22,7 +40,7 @@ RMSTHRESHOLD=3.0
 
 # API call to FlexType model
 API_BASE = "https://api.imagineville.org"
-keyboard_id = "dbca8af9683b49d197ae0ac73ddfb850"
+keyboard_id = "fc411cd7a30548409a5260fe3fdf501a"
 left = ""
 right = " "
 taps = []
@@ -61,27 +79,7 @@ gesture_strings = [
     'Three Fingers',
     'Surfs Up'
 ]
-##buffer = np.zeros((window_size, channels))
 
-##################################################################
-
-# Iitializing Mindrove EMG Sensor #
-BoardShim.enable_board_logger() # enable logger when developing to catch relevant logs
-params = MindRoveInputParams()
-board_id = BoardIds.MINDROVE_WIFI_BOARD
-board_shim = BoardShim(board_id, params)
-
-board_shim.prepare_session()
-
-emg_channels = BoardShim.get_emg_channels(board_id)
-#accel_channels = BoardShim.get_accel_channels(board_id)
-sampling_rate = BoardShim.get_sampling_rate(board_id)
-
-window_size = 2 # seconds
-window_size_samples = 125  # Match training window_size
-num_points = window_size_samples*8
-print()
-OffSet=300
 
 def reset():
     global left, right, taps, word_id, run, typing, checking
@@ -96,7 +94,6 @@ def reset():
 
 # Get live EMG data
 def get_emg_data(num_points):
-    print("Getting EMG Data...")
     #blocking loop
     while board_shim.get_board_data_count() < num_points:
         time.sleep(0.01)
@@ -107,7 +104,6 @@ def get_emg_data(num_points):
 
 # Preprocess data before passing to gesture prediction model (normalize/ filter)
 def process_data(EMGData):
-    print("Processing Data...")
     b, a = signal.butter(
         4,
         [20, 80],
@@ -237,79 +233,82 @@ try:
             typing = True
             checking = False
             wait = True
+            print("Typing Started")
 
         elif run:
-            if gesture_label in gesture_commands:
-                if gesture_label == "Surfs Up" and not wait:
-                    wait = True
-                    reset() # Reset typing
-                    continue
-
-                if wait and gesture_label == "Rest":
+            print(f"Run = {run}, Wait = {wait}, Typing = {typing}, Checking = {checking}")
+            if gesture_label == "Rest":
                     wait = False
-                    continue
 
-                if typing:
-                    if not wait:
-                        match gesture_label:
-                            case 'A-F':
-                                taps.append({"touches": [{"x": 0, "y": 0}], "certain": True})
-                                wait = True
-                            case 'G-M':
-                                taps.append({"touches": [{"x": 100, "y": 0}], "certain": True})
-                                wait = True
-                            case 'N-T':
-                                taps.append({"touches": [{"x": 200, "y": 0}], "certain": True})
-                                wait = True
-                            case 'U-Z':
-                                taps.append({"touches": [{"x": 300, "y": 0}], "certain": True})
-                                wait = True
-                            case 'Space/Enter': # Compile and check word
-                                wait = True
-                                typing = False
-                                checking = True
-                                word_pred = flexType(taps)
 
-                                print("\nPredicted Word: ")
-                                if "best" in word_pred and word_pred["best"]:
-                                    for i, pred in enumerate(word_pred["best"]):
-                                        print(f"Option {i}: {pred['text']}")
-                                else:
-                                    print("No words predicted.")
-                if checking:
-                    if not wait:
-                        if "best" in word_pred and len(word_pred["best"]) > 0:
+            if gesture_label == "Surfs Up" and not wait:
+                wait = True
+                reset() # Reset typing
+
+            if typing:
+                if not wait:
+                    match gesture_label:
+                        case 'Middle Pinch': #A-F
+                            taps.append({"touches": [{"x": 0, "y": 0}], "certain": True})
+                            wait = True
+                        case 'Ring Pinch': #G-M
+                            taps.append({"touches": [{"x": 100, "y": 0}], "certain": True})
+                            wait = True
+                        case 'Pinky Pinch': #N-T
+                            taps.append({"touches": [{"x": 200, "y": 0}], "certain": True})
+                            wait = True
+                        case 'Three Fingers': #U-Z
+                            taps.append({"touches": [{"x": 300, "y": 0}], "certain": True})
+                            wait = True
+                        case 'Knock': #Space/Enter -> Compile and check word
+                            wait = True
+                            typing = False
+                            checking = True
+                            word_pred = flexType(taps)
+
+                            print("\nPredicted Word: ")
+                            if "best" in word_pred and word_pred["best"]:
+                                for i, pred in enumerate(word_pred["best"]):
+                                    print(f"Option {i}: {pred['text']}")
+                            else:
+                                print("No words predicted.")
+
+                        case 'Thumb-Out': #Backspace
+                            if taps:
+                                taps = taps[:-1]
+                                wait = True
+                                
+            if checking:
+                if not wait:
+                    if "best" in word_pred and len(word_pred["best"]) > 0:
+                        word = word_pred["best"][word_id]["text"]
+                        print(f"CURRENT SELECTION: [{word}] (Gesture Swipe to change)")
+                    match gesture_label:
+                        case 'L-Sign': #Swipe -> Check next guessed word
+                            wait = True
+                            word_id+=1
+                            if word_id >= len(word_pred.get("best", [])):
+                                word_id = 0
                             word = word_pred["best"][word_id]["text"]
-                            print(f"CURRENT SELECTION: [{word}] (Gesture Swipe to change)")
-                        match gesture_label:
-                            case 'Swipe': # Check next guessed word
-                                wait = True
-                                word_id+=1
-                                if word_id >= len(word_pred.get("best", [])):
-                                    word_id = 0
-                                word = word_pred["best"][word_id]["text"]
-                                print(f"Swiped! New Selected Word: [{word}]")
-                            case 'Delete': # Delete just-typed word
-                                wait = True
-                                typing = True
-                                checking = False
-                                word_id = 0
-                                taps = []
-                            case 'Space/Enter': # Continue to next word
-                                wait = True
-                                typing = True
-                                checking = False
-                                left += word + " "
-                                word_id = 0
-                                print(f"\nFull Message:\n {left}")
-                                taps = []
+                            print(f"Swiped! New Selected Word: [{word}]")
+                        case 'Thumb-Out': #Delete -> Delete just-typed word
+                            wait = True
+                            typing = True
+                            checking = False
+                            word_id = 0
+                            taps = []
+                        case 'Knock': #Space/Enter -> Continue to next word
+                            wait = True
+                            typing = True
+                            checking = False
+                            left += word + " "
+                            word_id = 0
+                            print(f"\nFull Message:\n {left}")
+                            taps = []
 
-            time.sleep(0.1)
+            time.sleep(1)
 
 except KeyboardInterrupt:
     print("Stopping Predictions...")
     board_shim.stop_stream()
     board_shim.release_session()
-
-#     # buffer = np.roll(buffer, -1, axis=0)
-#     # buffer[-1, :] = raw_data
